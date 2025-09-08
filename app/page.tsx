@@ -1,103 +1,220 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useCartStore } from "@/store/use-cart-store";
+import { RingLoader } from "react-spinners";
+import Link from "next/link";
+import {
+  useInfiniteQuery,
+  InfiniteData,
+  useQuery,
+} from "@tanstack/react-query";
+import { FilterOptions, Product } from "@/types";
+import { FilterModal } from "@/components/filter-modal";
+
+interface ItemsApiResponse {
+  data: Product[];
+  total: number;
+}
+
+interface FilterState extends FilterOptions {
+  priceRange: [number, number];
+}
+
+async function fetchItems({
+  pageParam = 1,
+  queryKey,
+}: {
+  pageParam?: number;
+  queryKey: [string, FilterState];
+}): Promise<ItemsApiResponse> {
+  const filters = queryKey[1];
+  const params = new URLSearchParams();
+  params.append("page", pageParam.toString());
+  params.append("limit", "20");
+  if (filters.brands.length > 0)
+    params.append("brands", filters.brands.join(","));
+  if (filters.categories.length > 0)
+    params.append("categories", filters.categories.join(","));
+  if (filters.genders.length > 0)
+    params.append("genders", filters.genders.join(","));
+  params.append("minPrice", filters.priceRange[0].toString());
+  params.append("maxPrice", filters.priceRange[1].toString());
+
+  const res = await fetch(`/api/items?${params.toString()}`);
+  const data = await res.json();
+  return data;
+}
+
+async function fetchFilterOptions(): Promise<FilterOptions> {
+  const res = await fetch(`/api/filter-options`);
+  const data = await res.json();
+  return data;
+}
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [isFilterOpen, setFilterOpen] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const [filters, setFilters] = useState<FilterState>({
+    brands: [],
+    categories: [],
+    genders: [],
+    priceRange: [0, 5000],
+  });
+
+  const { data: filterOptionsData } = useQuery<FilterOptions, Error>({
+    queryKey: ["filterOptions"],
+    queryFn: fetchFilterOptions,
+  });
+
+  const [filterOptions, setFilterOptions] = useState<FilterOptions>(
+    filterOptionsData || {
+      brands: [],
+      categories: [],
+      genders: [],
+    }
+  );
+
+  useEffect(() => {
+    if (filterOptionsData) {
+      setFilterOptions(filterOptionsData);
+    }
+  }, [filterOptionsData]);
+
+  const { cart, addToCart } = useCartStore();
+
+  const {
+    data,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+    status,
+  } = useInfiniteQuery<
+    ItemsApiResponse,
+    Error,
+    InfiniteData<ItemsApiResponse>,
+    [string, FilterState],
+    number
+  >({
+    queryKey: ["items", filters],
+    queryFn: fetchItems,
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, pages) => {
+      return lastPage.data.length > 0 ? pages.length + 1 : undefined;
+    },
+  });
+
+  const handleApplyFilters = (newFilters: FilterState) => {
+    setFilters(newFilters);
+  };
+
+  const isItemInCart = (productId: number) => {
+    return cart.some((cartItem) => cartItem.productId === productId);
+  };
+
+  const items = useMemo(() => {
+    return data?.pages.flatMap((page) => page.data) ?? [];
+  }, [data]);
+
+  return (
+    <div className="container mx-auto p-4 ">
+      <div className="flex justify-between items-center mb-8">
+        <h2 className="text-4xl font-bold">All Products</h2>
+        <button
+          onClick={() => setFilterOpen(true)}
+          className="bg-blue-600 text-white p-3 rounded-md hover:bg-blue-700 transition-colors duration-300"
+        >
+          Filters
+        </button>
+      </div>
+
+      <AnimatePresence>
+        <FilterModal
+          isOpen={isFilterOpen}
+          onClose={() => setFilterOpen(false)}
+          options={filterOptions}
+          onApply={handleApplyFilters}
+        />
+      </AnimatePresence>
+
+      {isFetching && !isFetchingNextPage ? (
+        <div className="flex justify-center items-center h-96">
+          <RingLoader color="#3b82f6" size={80} />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      ) : status === "error" ? (
+        <div>Error: {error.message}</div>
+      ) : (
+        <>
+          <motion.div
+            layout
+            className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8"
+          >
+            {items.map((item: Product) => (
+              <motion.div
+                layout
+                key={item.id}
+                className="border border-gray-700 p-4 rounded-lg shadow-lg bg-gray-800 hover:shadow-2xl transition-shadow duration-300 flex flex-col justify-between"
+              >
+                <div>
+                  <img
+                    src={item.images[0]}
+                    alt={item.name}
+                    className="w-full h-64 object-cover rounded-md mb-4"
+                  />
+                  <h2 className="text-xl font-bold mb-2 line-clamp-2">
+                    {item.name}
+                  </h2>
+                  <p className="text-gray-400 mb-2">{item.brand.name}</p>
+                  <div className="flex justify-between items-center mb-2">
+                    <p className="text-lg font-semibold text-blue-400">
+                      ₹{Math.trunc(item.price)}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 w-full">
+                  {isItemInCart(item.id) ? (
+                    <Link href="/cart">
+                      <button className="bg-gray-600 text-white p-2 rounded-md w-full hover:bg-gray-700 transition-colors duration-300">
+                        View in Cart
+                      </button>
+                    </Link>
+                  ) : (
+                    <button
+                      onClick={() =>
+                        addToCart({
+                          productId: item.id,
+                          sizeId: 1,
+                          name: item.name,
+                          price: item.price,
+                          image: item.images[0],
+                          size: "One Size",
+                        })
+                      }
+                      className="bg-blue-600 text-white p-2 rounded-md w-full hover:bg-blue-700 transition-colors duration-300"
+                    >
+                      Add to Cart
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+          {hasNextPage && (
+            <div className="flex justify-center mt-8">
+              <button
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                className="bg-blue-600 text-white p-3 rounded-md hover:bg-blue-700 transition-colors duration-300 disabled:bg-gray-500"
+              >
+                {isFetchingNextPage ? "Loading..." : "Load More"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
