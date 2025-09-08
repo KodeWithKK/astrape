@@ -9,6 +9,10 @@ This is a Next.js project that serves as a full-stack e-commerce web application
 - **Shopping Cart**: Add/remove items from the cart.
 - **Database**: Uses PostgreSQL with Drizzle ORM for database management.
 
+## Live Link
+
+[https://k3astrape.vercel.app/](https://k3astrape.vercel.app/)
+
 ## Technologies Used
 
 - **Framework**: [Next.js](https://nextjs.org/)
